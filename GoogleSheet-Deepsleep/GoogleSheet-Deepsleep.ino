@@ -20,7 +20,7 @@ RtcDS3231<TwoWire> RTC(Wire);
 WiFiClientSecure httpsClient;
 File myfile;
 
-const char* ssid = "Wlan ohne Elan";
+const char* ssid = "Wlan ohne Elan"; //Wlan name here
 const char* password = "***"; //Wlan password here
 const char* host = "script.google.com";
 const int httpsPort = 443;

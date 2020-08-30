@@ -26,7 +26,7 @@ const char* host = "script.google.com";
 const int httpsPort = 443;
 
 String filename = "/data.csv";
-String GAS_ID = "***"; // Google sheet id here
+String GAS_ID = "***"; // Google Script id here
 float t;
 float h;
 float p;

@@ -20,13 +20,14 @@ RtcDS3231<TwoWire> RTC(Wire);
 WiFiClientSecure httpsClient;
 File myfile;
 
-const char* ssid = "Wlan ohne Elan";
+const char* ssid = "Wlan ohne Elan"; //Wlan name here
 const char* password = "***"; //Wlan password here
 const char* host = "script.google.com";
 const int httpsPort = 443;
 
 String filename = "/data.csv";
 String GAS_ID = "***"; // Google script id here
+
 int retry = 0;
 
 

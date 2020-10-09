@@ -26,12 +26,19 @@ const char* host = "script.google.com";
 const int httpsPort = 443;
 
 String filename = "/data.csv";
-String GAS_ID = "***"; // Google sheet id here
-float t;
-float h;
-float p;
-String time_string;
+String GAS_ID = "***"; // Google script id here
 int retry = 0;
+
+
+typedef struct {
+       float t;
+       float h;
+       float p;
+       String time_string;
+}measurement;
+
+measurement data[1] = {0, 0, 0, "0"};
+
 
 
 void getTime(){
@@ -45,15 +52,15 @@ void getTime(){
           currentTime.Hour(),   //get hour method
           currentTime.Minute() //get minute method
          );
-  time_string = str;
+  data[0].time_string = str;
   }
 
 void getSensor() {
-  h = BME.readFloatHumidity();
-  t = BME.readTempC();
-  p = BME.readFloatPressure() / 100;
+  data[0].h = BME.readFloatHumidity();
+  data[0].t = BME.readTempC();
+  data[0].p = BME.readFloatPressure() / 100;
 
-  if (isnan(h) || isnan(t) || isnan(p)) {
+  if (isnan(data[0].h) || isnan(data[0].t) || isnan(data[0].p)) {
     Serial.println("Failed to read from DHT sensor!");
     return;
   }
@@ -78,11 +85,11 @@ void setup() {
       retry = 0;
     }
     retry = 0;
-    sendData(t, h, p, time_string);
+    sendData(data);
     retry = 0;
   } else {
     if (InitOK) {
-      saveData(t, h, p, time_string);
+      saveData(data[0]);
       retry = 0;
     }
   }
@@ -165,14 +172,14 @@ void sendSavedData() {// does not work now. Just prints it line by line
 
     myfile.close();
     Serial.println("--------------------------------------------");
-    SPIFFS.remove(filename);
+    SPIFFS.remove(filename); // erst nach senden löschen !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   }
   else {
     return;
   }
 }
 
-void saveData(float t, float h, float p, String time_string) {
+void saveData(measurement data) {
   Serial.println();
   Serial.println("Saving Data localy");
   if (!SPIFFS.exists(filename)) {
@@ -184,17 +191,17 @@ void saveData(float t, float h, float p, String time_string) {
     Serial.println("Fehler beim schreiben der Datei");
   } else {
     Serial.print("Save one line:");
-    Serial.println(String(millis()) + "; " + String(t) + "; " + String(h) + "; " + String(p) + ";" + time_string + ";");
-    myfile.println(String(millis()) + "; " + String(t) + "; " + String(h) + "; " + String(p) + ";" + time_string + ";");
+    Serial.println(String(millis()) + "; " + String(data.t) + "; " + String(data.h) + "; " + String(data.p) + ";" + data.time_string + ";");
+    myfile.println(String(millis()) + "; " + String(data.t) + "; " + String(data.h) + "; " + String(data.p) + ";" + data.time_string + ";");
     myfile.close();
   }
 }
 
 // Function for Send data into Google Spreadsheet
-void sendData(float t, float h, float p, String time_string) {
+void sendData(measurement data[]) {
   httpsClient.setInsecure();
 
-  String url = "https://" + String(host) + "/macros/s/" + GAS_ID + "/exec?temp=" + String(t) + "&hum=" + String(h) + "&press=" + String(p) + "&time=" + time_string;
+  String url = "https://" + String(host) + "/macros/s/" + GAS_ID + "/exec?temp=" + String(data[0].t) + "&hum=" + String(data[0].h) + "&press=" + String(data[0].p) + "&time=" + data[0].time_string;
   Serial.println(url);
   Serial.print("Connecting to Google Sheet ");
   while ((!httpsClient.connect(host, httpsPort)) && (retry < 10)) {
@@ -205,11 +212,16 @@ void sendData(float t, float h, float p, String time_string) {
   Serial.println();
   if (retry == 10) {
     Serial.println("Connection failed");
-    saveData(t, h, p, time_string);
+    saveData(data[0]);
     ESP.deepSleep(durationSleep * 1e6);
   } else {
     Serial.println("Connected to Server");
   }
+  httpsClient.print(String("GET ") + url +
+                    " HTTP/1.1\r\n" +
+                    "Host: " + host +
+                    "\r\n" + "Connection: Keep-Alive\r\n\r\n");
+
   httpsClient.print(String("GET ") + url +
                     " HTTP/1.1\r\n" +
                     "Host: " + host +

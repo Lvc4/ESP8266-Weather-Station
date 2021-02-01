@@ -13,36 +13,35 @@
 #include <SPI.h>
 #include "FS.h"
 
-#define durationSleep 10   // in seconds
+#define durationSleep 900   // in seconds == 15 min
 
 BME280 BME;
 RtcDS3231<TwoWire> RTC(Wire);
 WiFiClientSecure httpsClient;
 File myfile;
 
-const char* ssid = "Wlan ohne Elan"; //Wlan name here
-const char* password = "***"; //Wlan password here
+const char* ssid = "**"; //Wlan name here
+const char* password = "**"; //Wlan password here
 const char* host = "script.google.com";
 const int httpsPort = 443;
 
 String filename = "/data.csv";
-String GAS_ID = "***"; // Google script id here
+String GAS_ID = "**"; // Google script id here
 
 int retry = 0;
 
 
 typedef struct {
-       float t;
-       float h;
-       float p;
-       String time_string;
-}measurement;
+  float t;
+  float h;
+  float p;
+  String time_string;
+} measurement;
 
 measurement data[1] = {0, 0, 0, "0"};
 
 
-
-void getTime(){
+void getTime() {
   RtcDateTime currentTime = RTC.GetDateTime();    //get the time from the RTC
 
   char str[20];   //declare a string as an array of chars
@@ -54,7 +53,7 @@ void getTime(){
           currentTime.Minute() //get minute method
          );
   data[0].time_string = str;
-  }
+}
 
 void getSensor() {
   data[0].h = BME.readFloatHumidity();
@@ -110,7 +109,7 @@ void setup() {
   ESP.deepSleep(durationSleep * 1e6);
 }
 
-void loop(){
+void loop() {
 }
 
 void setup_bme() {
@@ -157,6 +156,22 @@ boolean setup_wifi() {
 }
 
 void sendSavedData() {// does not work now. Just prints it line by line
+  httpsClient.setInsecure();
+  Serial.print("Connecting to Google Sheet ");
+  while ((!httpsClient.connect(host, httpsPort)) && (retry < 10)) {
+    delay(100);
+    Serial.print(".");
+    retry++;
+  }
+  Serial.println();
+  if (retry == 10) {
+    Serial.println("Connection failed");
+    saveData(data[0]);
+    ESP.deepSleep(durationSleep * 1e6);
+  } else {
+    Serial.println("Connected to Server");
+  }
+
   Serial.println();
   if (SPIFFS.exists(filename)) {
     Serial.println("sending saved data");
@@ -167,13 +182,38 @@ void sendSavedData() {// does not work now. Just prints it line by line
     String content;
     while (myfile.position() < myfile.size())
     {
-      content = myfile.readStringUntil('\n');
-      Serial.println(content + " | end of line");
-    }
+      content = myfile.readStringUntil('\n');  // split content to data
+      String da[5]; // elements to split the string into
+      int r = 0, t = 0;
+      for (int i = 0; i < content.length(); i++)
+      {
+        if (content.charAt(i) == ';')
+        {
+          da[t] = content.substring(r, i);
+          r = (i + 1);
+          t++;
+        }
+      }// splitting string
+      //  da[0]   mills
+      //  da[1]   temp
+      //  da[2]   hum
+      //  da[3]   pres
+      //  da[4]   time
 
+      String url = "https://" + String(host) + "/macros/s/" + GAS_ID + "/exec?temp=" + da[1] + "&hum=" + da[2] + "&press=" + da[3] + "&time=" + da[4];
+      httpsClient.print(String("GET ") + url +
+                        " HTTP/1.1\r\n" +
+                        "Host: " + host +
+                        "\r\n" + "Connection: Keep-Alive\r\n\r\n");
+      Serial.println(url);
+    }
+    httpsClient.print(String("GET ") + "https://" + String(host) + "/" +
+                      " HTTP/1.1\r\n" +
+                      "Host: " + host +
+                      "\r\n" + "Connection: close\r\n\r\n");
     myfile.close();
     Serial.println("--------------------------------------------");
-    SPIFFS.remove(filename); // erst nach senden löschen !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    SPIFFS.remove(filename);
   }
   else {
     return;
@@ -192,8 +232,8 @@ void saveData(measurement data) {
     Serial.println("Fehler beim schreiben der Datei");
   } else {
     Serial.print("Save one line:");
-    Serial.println(String(millis()) + "; " + String(data.t) + "; " + String(data.h) + "; " + String(data.p) + ";" + data.time_string + ";");
-    myfile.println(String(millis()) + "; " + String(data.t) + "; " + String(data.h) + "; " + String(data.p) + ";" + data.time_string + ";");
+    Serial.println(String(millis()) + ";" + String(data.t) + ";" + String(data.h) + ";" + String(data.p) + ";" + data.time_string + ";");
+    myfile.println(String(millis()) + ";" + String(data.t) + ";" + String(data.h) + ";" + String(data.p) + ";" + data.time_string + ";");
     myfile.close();
   }
 }
@@ -221,12 +261,8 @@ void sendData(measurement data[]) {
   httpsClient.print(String("GET ") + url +
                     " HTTP/1.1\r\n" +
                     "Host: " + host +
-                    "\r\n" + "Connection: Keep-Alive\r\n\r\n");
-
-  httpsClient.print(String("GET ") + url +
-                    " HTTP/1.1\r\n" +
-                    "Host: " + host +
                     "\r\n" + "Connection: close\r\n\r\n");
+
   Serial.println("Data sent");
 }
 

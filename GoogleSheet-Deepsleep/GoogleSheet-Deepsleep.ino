@@ -6,35 +6,37 @@
 //              and saves data localy if no wifi is available
 // update ssid, password and GAS_ID
 //-----------------------------------------------
+
 #include <ESP8266WiFi.h>
 #include "SparkFunBME280.h"
 #include <RtcDS3231.h> //RTC library
 #include <WiFiClientSecure.h>
 #include <SPI.h>
-#include "FS.h"
 
-#define durationSleep 900   // in seconds == 15 min
+#include "LittleFS.h"
+
+#define durationSleep 2   // in seconds
 
 BME280 BME;
 RtcDS3231<TwoWire> RTC(Wire);
 WiFiClientSecure httpsClient;
 File myfile;
 
-const char* ssid = "**"; //Wlan name here
-const char* password = "**"; //Wlan password here
+const char* ssid = "***"; // Wlan name here
+const char* password = "***"; // Wlan password here
 const char* host = "script.google.com";
 const int httpsPort = 443;
 
 String filename = "/data.csv";
-String GAS_ID = "**"; // Google script id here
+String GAS_ID = "***"; // Google script id here
 
 int retry = 0;
-
+int retry_number = 15;
 
 typedef struct {
   float t;
-  float h;
-  float p;
+  int h;
+  int p;
   String time_string;
 } measurement;
 
@@ -66,6 +68,10 @@ void getSensor() {
   }
 }
 void setup() {
+  WiFi.mode( WIFI_OFF );   // for lower power consumpton
+  WiFi.forceSleepBegin();
+  delay( 1 );
+  
   Serial.begin(9600); //Serial
   delay(500);
   Serial.println();
@@ -83,7 +89,9 @@ void setup() {
     if (InitOK) {
       sendSavedData();
       retry = 0;
-    }
+    }else{
+      Serial.println("init not OK");
+      }
     retry = 0;
     sendData(data);
     retry = 0;
@@ -106,26 +114,32 @@ void setup() {
   Serial.println();
   Serial.println();
   Serial.println();
-  ESP.deepSleep(durationSleep * 1e6);
+  go_sleep();
 }
 
 void loop() {
 }
 
+void go_sleep(){
+  WiFi.disconnect( true );
+  delay( 1 );
+  ESP.deepSleep(durationSleep * 1e6, WAKE_RF_DISABLED );
+  }
+
 void setup_bme() {
   Serial.println();
   Serial.print("Connecting to BME280 ");
   BME.setI2CAddress(0x76);
-  while ((!BME.beginI2C()) && retry < 10) {
+  while ((!BME.beginI2C()) && retry < retry_number) {
     BME.setI2CAddress(0x76);
     Serial.print(".");
     retry++;
     delay(500);
   }
   Serial.println();
-  if (retry == 10) {
+  if (retry == retry_number) {
     Serial.println("Conection to BME280 failed");
-    ESP.deepSleep(durationSleep * 1e6);
+    go_sleep();
   }
   retry = 0;
   Serial.println("Connected to BME280");
@@ -135,13 +149,19 @@ boolean setup_wifi() {
   Serial.println();
   Serial.print("Connecting to ");
   Serial.print(ssid);
+ 
+  WiFi.forceSleepWake(); // for lower power consumption
+  delay( 1 );
+  WiFi.persistent( false );
+  WiFi.mode( WIFI_STA );
+
   WiFi.begin(ssid, password);
-  while ((WiFi.status() != WL_CONNECTED) && retry < 15) {
+  while ((WiFi.status() != WL_CONNECTED) && retry < retry_number) {
     Serial.print(".");
     delay(750);
     retry++;      // Wenn nach 10 Versuchen nicht mit WiFi verbunden werden kann, deep-sleep
   }
-  if (retry == 15 ) {
+  if (retry == retry_number ) {
     Serial.println();
     Serial.println("Kann nicht mit WiFi verbunden werden, speichere Daten lokal");
     Serial.println();
@@ -158,32 +178,32 @@ boolean setup_wifi() {
 void sendSavedData() {// does not work now. Just prints it line by line
   httpsClient.setInsecure();
   Serial.print("Connecting to Google Sheet ");
-  while ((!httpsClient.connect(host, httpsPort)) && (retry < 10)) {
+  while ((!httpsClient.connect(host, httpsPort)) && (retry < retry_number)) {
     delay(100);
     Serial.print(".");
     retry++;
   }
   Serial.println();
-  if (retry == 10) {
+  if (retry == retry_number) {
     Serial.println("Connection failed");
     saveData(data[0]);
-    ESP.deepSleep(durationSleep * 1e6);
+    go_sleep();
   } else {
     Serial.println("Connected to Server");
   }
 
   Serial.println();
-  if (SPIFFS.exists(filename)) {
+  if (LittleFS.exists(filename)) {
     Serial.println("sending saved data");
     Serial.println("--------------------------------------------");
 
-    myfile = SPIFFS.open(filename, "r");
+    myfile = LittleFS.open(filename, "r");
 
     String content;
     while (myfile.position() < myfile.size())
     {
       content = myfile.readStringUntil('\n');  // split content to data
-      String da[5]; // elements to split the string into
+      String da[4]; // elements to split the string into
       int r = 0, t = 0;
       for (int i = 0; i < content.length(); i++)
       {
@@ -194,18 +214,18 @@ void sendSavedData() {// does not work now. Just prints it line by line
           t++;
         }
       }// splitting string
-      //  da[0]   mills
       //  da[1]   temp
       //  da[2]   hum
       //  da[3]   pres
       //  da[4]   time
 
-      String url = "https://" + String(host) + "/macros/s/" + GAS_ID + "/exec?temp=" + da[1] + "&hum=" + da[2] + "&press=" + da[3] + "&time=" + da[4];
+      String url = "https://" + String(host) + "/macros/s/" + GAS_ID + "/exec?temp=" + da[0] + "&hum=" + da[1] + "&press=" + da[2] + "&time=" + da[3];
       httpsClient.print(String("GET ") + url +
                         " HTTP/1.1\r\n" +
                         "Host: " + host +
                         "\r\n" + "Connection: Keep-Alive\r\n\r\n");
       Serial.println(url);
+      delay(750);
     }
     httpsClient.print(String("GET ") + "https://" + String(host) + "/" +
                       " HTTP/1.1\r\n" +
@@ -213,7 +233,7 @@ void sendSavedData() {// does not work now. Just prints it line by line
                       "\r\n" + "Connection: close\r\n\r\n");
     myfile.close();
     Serial.println("--------------------------------------------");
-    SPIFFS.remove(filename);
+    LittleFS.remove(filename);
   }
   else {
     return;
@@ -223,17 +243,17 @@ void sendSavedData() {// does not work now. Just prints it line by line
 void saveData(measurement data) {
   Serial.println();
   Serial.println("Saving Data localy");
-  if (!SPIFFS.exists(filename)) {
-    myfile = SPIFFS.open(filename, "w");
+  if (!LittleFS.exists(filename)) {
+    myfile = LittleFS.open(filename, "w");
   } else {
-    myfile = SPIFFS.open(filename, "a");
+    myfile = LittleFS.open(filename, "a");
   }
   if (!myfile) {
     Serial.println("Fehler beim schreiben der Datei");
   } else {
     Serial.print("Save one line:");
-    Serial.println(String(millis()) + ";" + String(data.t) + ";" + String(data.h) + ";" + String(data.p) + ";" + data.time_string + ";");
-    myfile.println(String(millis()) + ";" + String(data.t) + ";" + String(data.h) + ";" + String(data.p) + ";" + data.time_string + ";");
+    Serial.println(String(data.t) + ";" + String(data.h) + ";" + String(data.p) + ";" + data.time_string + ";");
+    myfile.println(String(data.t) + ";" + String(data.h) + ";" + String(data.p) + ";" + data.time_string + ";");
     myfile.close();
   }
 }
@@ -245,16 +265,16 @@ void sendData(measurement data[]) {
   String url = "https://" + String(host) + "/macros/s/" + GAS_ID + "/exec?temp=" + String(data[0].t) + "&hum=" + String(data[0].h) + "&press=" + String(data[0].p) + "&time=" + data[0].time_string;
   Serial.println(url);
   Serial.print("Connecting to Google Sheet ");
-  while ((!httpsClient.connect(host, httpsPort)) && (retry < 10)) {
+  while ((!httpsClient.connect(host, httpsPort)) && (retry < retry_number)) {
     delay(100);
     Serial.print(".");
     retry++;
   }
   Serial.println();
-  if (retry == 10) {
+  if (retry == retry_number) {
     Serial.println("Connection failed");
     saveData(data[0]);
-    ESP.deepSleep(durationSleep * 1e6);
+    go_sleep();
   } else {
     Serial.println("Connected to Server");
   }
@@ -267,20 +287,20 @@ void sendData(measurement data[]) {
 }
 
 boolean InitalizeFileSystem() {
-  Serial.print("Initializing SPIFFS ");
+  Serial.print("Initializing LittleFS ");
   bool initok = false;
-  initok = SPIFFS.begin();
-  while ((!initok) && retry < 10) {
+  initok = LittleFS.begin();
+  while ((!initok) && retry < retry_number) {
     Serial.print(".");
-    SPIFFS.format();
-    initok = SPIFFS.begin();
+    LittleFS.format();
+    initok = LittleFS.begin();
     retry++;
   }
   Serial.println();
   if (initok) {
-    Serial.println("SPIFFS succesessfuly initialized");
+    Serial.println("LittleFS succesessfuly initialized");
   } else {
-    Serial.println("SPIFFS error");
+    Serial.println("LittleFS error");
   }
   return initok;
 }

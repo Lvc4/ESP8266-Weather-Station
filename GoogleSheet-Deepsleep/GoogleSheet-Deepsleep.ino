@@ -15,7 +15,7 @@
 
 #include "LittleFS.h"
 
-#define durationSleep 2   // in seconds
+#define durationSleep 900  * 1e6 // in seconds  * 1e6
 
 BME280 BME;
 RtcDS3231<TwoWire> RTC(Wire);
@@ -33,14 +33,17 @@ String GAS_ID = "***"; // Google script id here
 int retry = 0;
 int retry_number = 15;
 
+const int sensor_pin = A0;
+
 typedef struct {
   float t;
   int h;
   int p;
+  int r;
   String time_string;
 } measurement;
 
-measurement data[1] = {0, 0, 0, "0"};
+measurement data[1] = {0, 0, 0, 0, "0"};
 
 
 void getTime() {
@@ -61,7 +64,7 @@ void getSensor() {
   data[0].h = BME.readFloatHumidity();
   data[0].t = BME.readTempC();
   data[0].p = BME.readFloatPressure() / 100;
-
+  data[0].r = analogRead(sensor_pin);
   if (isnan(data[0].h) || isnan(data[0].t) || isnan(data[0].p)) {
     Serial.println("Failed to read from DHT sensor!");
     return;
@@ -73,6 +76,7 @@ void setup() {
   delay( 1 );
   
   Serial.begin(9600); //Serial
+  pinMode(sensor_pin, INPUT);
   delay(500);
   Serial.println();
   SPI.begin();
@@ -123,7 +127,7 @@ void loop() {
 void go_sleep(){
   WiFi.disconnect( true );
   delay( 1 );
-  ESP.deepSleep(durationSleep * 1e6, WAKE_RF_DISABLED );
+  ESP.deepSleep(durationSleep , WAKE_RF_DISABLED );
   }
 
 void setup_bme() {
@@ -203,7 +207,7 @@ void sendSavedData() {// does not work now. Just prints it line by line
     while (myfile.position() < myfile.size())
     {
       content = myfile.readStringUntil('\n');  // split content to data
-      String da[4]; // elements to split the string into
+      String da[5]; // elements to split the string into
       int r = 0, t = 0;
       for (int i = 0; i < content.length(); i++)
       {
@@ -217,9 +221,10 @@ void sendSavedData() {// does not work now. Just prints it line by line
       //  da[1]   temp
       //  da[2]   hum
       //  da[3]   pres
-      //  da[4]   time
+      //  da[4]   rainfall
+      //  da[5]   time
 
-      String url = "https://" + String(host) + "/macros/s/" + GAS_ID + "/exec?temp=" + da[0] + "&hum=" + da[1] + "&press=" + da[2] + "&time=" + da[3];
+      String url = "https://" + String(host) + "/macros/s/" + GAS_ID + "/exec?temp=" + da[0] + "&hum=" + da[1] + "&press=" + da[2] + "&rain=" + da[3] + "&time=" + da[4];
       httpsClient.print(String("GET ") + url +
                         " HTTP/1.1\r\n" +
                         "Host: " + host +
@@ -252,8 +257,8 @@ void saveData(measurement data) {
     Serial.println("Fehler beim schreiben der Datei");
   } else {
     Serial.print("Save one line:");
-    Serial.println(String(data.t) + ";" + String(data.h) + ";" + String(data.p) + ";" + data.time_string + ";");
-    myfile.println(String(data.t) + ";" + String(data.h) + ";" + String(data.p) + ";" + data.time_string + ";");
+    Serial.println(String(data.t) + ";" + String(data.h) + ";" + String(data.p) + ";" + String(data.r) + ";" + data.time_string + ";");
+    myfile.println(String(data.t) + ";" + String(data.h) + ";" + String(data.p) + ";" + String(data.r) + ";" + data.time_string + ";");
     myfile.close();
   }
 }
@@ -262,7 +267,7 @@ void saveData(measurement data) {
 void sendData(measurement data[]) {
   httpsClient.setInsecure();
 
-  String url = "https://" + String(host) + "/macros/s/" + GAS_ID + "/exec?temp=" + String(data[0].t) + "&hum=" + String(data[0].h) + "&press=" + String(data[0].p) + "&time=" + data[0].time_string;
+  String url = "https://" + String(host) + "/macros/s/" + GAS_ID + "/exec?temp=" + String(data[0].t) + "&hum=" + String(data[0].h) + "&press=" + String(data[0].p) + "&rain=" + String(data[0].r) + "&time=" + data[0].time_string;
   Serial.println(url);
   Serial.print("Connecting to Google Sheet ");
   while ((!httpsClient.connect(host, httpsPort)) && (retry < retry_number)) {
